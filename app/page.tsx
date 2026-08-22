@@ -115,7 +115,7 @@ export default function Home() {
   </main>;
 
   if (stage === "eggs") return <main className="eggs-shell">
-    <header className="eggs-topbar"><button className="brand" onClick={restartIntake}><span className="brand-mark">◌</span><span><strong>海洋馆奇妙夜</strong><small>这一大颗泡泡，已经慢慢分开了</small></span></button><span>V3.1 · 手绘深海</span></header>
+    <header className="eggs-topbar"><button className="brand" onClick={restartIntake}><span className="brand-mark">◌</span><span><strong>海洋馆奇妙夜</strong><small>这一大颗泡泡，已经慢慢分开了</small></span></button><span>V3.2 · 不漏掉任何事</span></header>
     <section className="eggs-hero"><p className="eyebrow">THE OCEAN HEARD YOU · 海洋听见了</p><h1>{intakeResult?.summary}</h1><p>{intakeResult?.careNote}</p></section>
     <section className="eggs-grid">{eggs.map((item, index) => <article className={`egg-card ${item.color}`} key={item.id}>
       <div className="egg-visual"><span className="egg-shell">◉</span><span className="egg-creature">{item.creature}</span><i>{String(index + 1).padStart(2, "0")}</i></div>
@@ -131,7 +131,7 @@ export default function Home() {
   return <main className="app-shell">
     <header className="topbar">
       <button className="brand" onClick={() => setMode("shallow")} aria-label="返回浅海首页"><span className="brand-mark">◌</span><span><strong>海洋馆奇妙夜</strong><small>让重要的事，轻轻向前游</small></span></button>
-      <nav aria-label="主要导航"><span className="version-chip">V3.1 · 手绘深海</span><button className={`nav-pill ${mode === "shallow" ? "active" : ""}`} onClick={() => setMode("shallow")}>浅海 · 今天</button><button className={`nav-pill ${mode === "deep" ? "active deep-active" : ""}`} onClick={() => setMode("deep")}>深海 · 长期</button><button className="icon-button" onClick={() => setModal("collection")} aria-label="打开海洋图鉴">✦</button></nav>
+      <nav aria-label="主要导航"><span className="version-chip">V3.2 · 不漏掉任何事</span><button className={`nav-pill ${mode === "shallow" ? "active" : ""}`} onClick={() => setMode("shallow")}>浅海 · 今天</button><button className={`nav-pill ${mode === "deep" ? "active deep-active" : ""}`} onClick={() => setMode("deep")}>深海 · 长期</button><button className="icon-button" onClick={() => setModal("collection")} aria-label="打开海洋图鉴">✦</button></nav>
     </header>
     <section className="welcome-row"><div><p className="eyebrow">SATURDAY · 8月22日</p><h1>{mode === "shallow" ? <>晚上好，Shary<br />今天想和哪条鱼一起游？</> : <>欢迎来到深海<br />那些遥远的事，也在缓慢发光</>}</h1></div><button className="weather-card" onClick={() => setModal("weather")}><span className="weather-icon">{weather.icon}</span><span><small>今日海况</small><strong>{weather.name} · {weather.capacity}枚氧气</strong></span><span>⌄</span></button></section>
 
