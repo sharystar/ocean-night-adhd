@@ -3,6 +3,7 @@ git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEM
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Decomposition, RouteFeedback, RouteStep, WorkPackId } from "../lib/decompose";
+import type { IntakeEgg, IntakeResult } from "../lib/intake";
 
 type Modal = null | "capture" | "weather" | "focus" | "rescue" | "collection" | "celebrate" | "workpack";
 type Task = { id: number; title: string; creature: string; species: string; next: string; minutes: number; oxygen: number; status: "active" | "waiting" | "ready" | "done"; color: string; steps?: RouteStep[]; workPack?: WorkPackId; doneDefinition?: string };
@@ -25,6 +26,11 @@ const workPackMeta: Record<Exclude<WorkPackId, null>, { icon: string; label: str
 };
 
 export default function Home() {
+  const [stage, setStage] = useState<"intake" | "eggs" | "tank">("intake");
+  const [intakeLoading, setIntakeLoading] = useState(false);
+  const [intakeError, setIntakeError] = useState("");
+  const [intakeResult, setIntakeResult] = useState<IntakeResult | null>(null);
+  const [eggs, setEggs] = useState<IntakeEgg[]>([]);
   const [modal, setModal] = useState<Modal>(null);
   const [mode, setMode] = useState<"shallow" | "deep">("shallow");
   const [tasks, setTasks] = useState<Task[]>(startingTasks);
@@ -72,24 +78,73 @@ export default function Home() {
   }
   function openPack(id: Exclude<WorkPackId, null>) { setPackId(id); setModal("workpack"); }
   function completeStep() { setTasks((current) => current.map((task) => task.id === selectedId ? { ...task, status: "done" } : task)); setRunning(false); setModal("celebrate"); }
+  async function sortIntake(event: FormEvent) {
+    event.preventDefault();
+    if (capture.trim().length < 2) return;
+    setIntakeLoading(true); setIntakeError("");
+    try {
+      const response = await fetch("/api/intake", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ input: capture }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "泡泡暂时没有分开，请再试一次。");
+      setIntakeResult(result); setEggs(result.eggs); setStage("eggs");
+    } catch (error) { setIntakeError(error instanceof Error ? error.message : "泡泡暂时没有分开，请再试一次。"); }
+    finally { setIntakeLoading(false); }
+  }
+  function updateEgg(id: string, patch: Partial<IntakeEgg>) { setEggs((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item)); }
+  function addEggsToTank() {
+    const nextTasks: Task[] = eggs.map((item, index) => ({ id: Date.now() + index, title: item.title, creature: item.creature, species: item.species, next: item.firstStep, minutes: item.estimatedMinutes, oxygen: item.kind === "emotion" ? 0 : Math.min(3, Math.max(1, Math.ceil(item.estimatedMinutes / 45))), status: "ready", color: item.color, doneDefinition: item.doneDefinition }));
+    setTasks(nextTasks); if (nextTasks[0]) setSelectedId(nextTasks[0].id); setStage("tank"); setCapture(""); setIntakeResult(null);
+  }
+  function restartIntake() { setCapture(""); setIntakeResult(null); setEggs([]); setIntakeError(""); setStage("intake"); }
+  function changeSelectedMinutes(value: number) {
+    const minutes = Math.min(600, Math.max(5, Number.isFinite(value) ? value : 5));
+    setTasks((current) => current.map((task) => task.id === selectedId ? { ...task, minutes } : task)); setSeconds(minutes * 60);
+  }
   const clock = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+
+  if (stage === "intake") return <main className="intake-shell">
+    <header className="intake-brand"><span className="brand-mark">◌</span><span><strong>海洋馆奇妙夜</strong><small>今天不用先整理好自己</small></span></header>
+    <section className="intake-stage">
+      <div className="hungry-bubble" aria-label="一颗正在等待长大的泡泡"><i /><span>◉</span><small>嗷嗷待哺</small></div>
+      <div className="intake-copy"><p className="eyebrow">OCEAN INBOX · 一次说完</p><h1>今天脑子里有什么，<br />都可以倒进这颗泡泡。</h1><p>任务、抱怨、犹豫和情绪可以混在一起。海洋会替你慢慢分开。</p></div>
+      <form className="ocean-chat" onSubmit={sortIntake}>
+        <textarea autoFocus value={capture} onChange={(event) => setCapture(event.target.value)} placeholder="比如：导师临时让我做 PPT，还要翻译；我想补一些 evidence；自己的文章也要推进，可是他一直不看，我又不敢催……" />
+        {intakeError && <p className="intake-error">{intakeError}</p>}
+        <div><span>{intakeLoading ? "海洋正在辨认混在一起的水流…" : "不用列清单，想到哪里说到哪里。"}</span><button type="submit" disabled={capture.trim().length < 2 || intakeLoading}>{intakeLoading ? "泡泡正在长大…" : "把泡泡送进海里 →"}</button></div>
+      </form>
+    </section>
+  </main>;
+
+  if (stage === "eggs") return <main className="eggs-shell">
+    <header className="eggs-topbar"><button className="brand" onClick={restartIntake}><span className="brand-mark">◌</span><span><strong>海洋馆奇妙夜</strong><small>这一大颗泡泡，已经慢慢分开了</small></span></button><span>V3 · OCEAN INBOX</span></header>
+    <section className="eggs-hero"><p className="eyebrow">THE OCEAN HEARD YOU · 海洋听见了</p><h1>{intakeResult?.summary}</h1><p>{intakeResult?.careNote}</p></section>
+    <section className="eggs-grid">{eggs.map((item, index) => <article className={`egg-card ${item.color}`} key={item.id}>
+      <div className="egg-visual"><span className="egg-shell">◉</span><span className="egg-creature">{item.creature}</span><i>{String(index + 1).padStart(2, "0")}</i></div>
+      <div className="egg-kind"><span>{item.kindLabel}</span><em>{item.species}正在里面等你</em></div>
+      <label className="egg-title"><span className="sr-only">鱼卵任务名称</span><input value={item.title} onChange={(event) => updateEgg(item.id, { title: event.target.value })} /></label>
+      <p>{item.reason}</p><div className="egg-first"><small>孵化后先从这里靠近</small><strong>{item.firstStep}</strong></div>
+      <label className="time-estimate"><span>你觉得整件事大约需要</span><span><input type="number" min="5" max="600" step="5" value={item.estimatedMinutes} onChange={(event) => updateEgg(item.id, { estimatedMinutes: Math.min(600, Math.max(5, Number(event.target.value) || 5)) })} /> 分钟</span></label>
+      <small className="time-note">这是你的估计，不是系统规定；之后仍然可以修改。</small>
+    </article>)}</section>
+    <footer className="eggs-actions"><button onClick={restartIntake}>← 回去再说一点</button><div><span>{eggs.length} 枚鱼卵 · 时间由你决定</span><button className="primary-action" onClick={addEggsToTank}>把它们放进今日生态缸 →</button></div></footer>
+  </main>;
 
   return <main className="app-shell">
     <header className="topbar">
       <button className="brand" onClick={() => setMode("shallow")} aria-label="返回浅海首页"><span className="brand-mark">◌</span><span><strong>海洋馆奇妙夜</strong><small>让重要的事，轻轻向前游</small></span></button>
-      <nav aria-label="主要导航"><span className="version-chip">V2 · 潜水向导</span><button className={`nav-pill ${mode === "shallow" ? "active" : ""}`} onClick={() => setMode("shallow")}>浅海 · 今天</button><button className={`nav-pill ${mode === "deep" ? "active deep-active" : ""}`} onClick={() => setMode("deep")}>深海 · 长期</button><button className="icon-button" onClick={() => setModal("collection")} aria-label="打开海洋图鉴">✦</button></nav>
+      <nav aria-label="主要导航"><span className="version-chip">V3 · 海洋收件箱</span><button className={`nav-pill ${mode === "shallow" ? "active" : ""}`} onClick={() => setMode("shallow")}>浅海 · 今天</button><button className={`nav-pill ${mode === "deep" ? "active deep-active" : ""}`} onClick={() => setMode("deep")}>深海 · 长期</button><button className="icon-button" onClick={() => setModal("collection")} aria-label="打开海洋图鉴">✦</button></nav>
     </header>
     <section className="welcome-row"><div><p className="eyebrow">SATURDAY · 8月22日</p><h1>{mode === "shallow" ? <>晚上好，Shary<br />今天想和哪条鱼一起游？</> : <>欢迎来到深海<br />那些遥远的事，也在缓慢发光</>}</h1></div><button className="weather-card" onClick={() => setModal("weather")}><span className="weather-icon">{weather.icon}</span><span><small>今日海况</small><strong>{weather.name} · {weather.capacity}枚氧气</strong></span><span>⌄</span></button></section>
 
     {mode === "shallow" ? <>
       {signalVisible && !signalQuiet && <section className="ocean-signal"><span className="signal-orb">◉</span><div><p className="eyebrow">OCEAN SIGNAL · 海洋主动来找你</p><strong>论文鱼看起来有点大。要不要只陪它游两分钟？</strong><small>我会把其余步骤暂时放到看不见的地方。</small></div><button onClick={() => { setSelectedId(1); setSeconds(2 * 60); setModal("focus"); }}>好，带我去</button><button className="quiet-signal" onClick={() => setSignalQuiet(true)}>今天少说一点</button></section>}
       <section className="dashboard-grid"><div className="left-column">
-        <article className="capture-card"><div className="capture-icon">✧</div><div><span className="mini-ai">会因事而变的路线</span><h2>脑子里突然冒出来了？</h2><p>先放进这里。潜水向导会辨认它真正需要什么。</p></div><button onClick={() => openCapture()}>说给我听 <span>→</span></button></article>
+        <article className="capture-card"><div className="capture-icon">✧</div><div><span className="mini-ai">一次说完 · 自动分流</span><h2>脑子里又挤进很多事情？</h2><p>回到海洋收件箱，不必先把它们整理成清单。</p></div><button onClick={restartIntake}>说给我听 <span>→</span></button></article>
         <article className="task-panel"><div className="section-heading"><div><p className="eyebrow">TODAY&apos;S TANK</p><h2>今日生态缸</h2></div><div className="oxygen"><span>{oxygenDots.map((full, index) => <i key={index} className={full ? "full" : ""}>●</i>)}</span><small>{usedOxygen} / {weather.capacity} 氧气</small></div></div>
           {tasks.filter((task) => task.status !== "done").map((task) => <button key={task.id} className={`task-card ${task.id === selectedId ? "selected" : ""}`} onClick={() => openFocus(task)}><span className={`fish-avatar ${task.color}`}>{task.creature}</span><span className="task-copy"><small>{task.species} · {task.status === "waiting" ? "候潮中" : task.id === selectedId ? "正在跟随" : "准备下潜"}</small><strong>{task.title}</strong><span>{task.status === "waiting" ? task.next : `下一步：${task.next}`}</span>{task.status !== "waiting" && <span className="task-meta"><b>约 {task.minutes} 分钟</b><i>{task.oxygen} 枚氧气</i></span>}</span><span className={task.status === "waiting" ? "more" : "play"}>{task.status === "waiting" ? "•••" : "▶"}</span></button>)}
-          <button className="add-small" onClick={() => openCapture()}>＋ 放进一枚新的鱼卵</button></article>
+          <button className="add-small" onClick={restartIntake}>＋ 再说一颗混着很多事情的大泡泡</button></article>
       </div><aside className="aquarium-card"><div className="aquarium-top"><div><p className="eyebrow">YOUR LITTLE OCEAN</p><h2>你的浅海</h2></div><span>水质清澈 · 生态舒适</span></div><div className="tank" aria-label="夜光浅海生态缸">{["b1","b2","b3","b4","b5"].map((name) => <span className={`bubble ${name}`} key={name} />)}<span className="swim-fish fish-one">🐠</span><span className="swim-fish fish-two">🐟</span><span className="swim-fish fish-three">🪼</span>{tasks.length > 2 && <span className="swim-fish fish-four">{tasks.at(-1)?.creature}</span>}<div className="light-ray one" /><div className="light-ray two" /><div className="plant plant-one">〽</div><div className="plant plant-two">♒</div><div className="sand" /><div className="coral">♨</div></div><div className="tank-footer"><div><span className="egg">◉</span><span><small>正在孵化</small><strong>完成下一小步，让鱼卵裂开</strong></span></div><button onClick={() => openFocus(selectedTask)}>去跟随这条鱼</button></div></aside></section>
-    </> : <section className="deep-panel"><div className="deep-water"><div className="deep-glow glow-one" /><div className="deep-glow glow-two" /><span className="whale">🐋</span><span className="deep-jelly">🪼</span><div className="migration-card"><p className="eyebrow">MIGRATION 01</p><span>鲸鲨 · 长期迁徙</span><h2>完成博士论文</h2><p>不需要今天抵达。每一次十分钟，都会让它穿过一小片海。</p><div className="migration-line"><i /><i /><i className="current" /><i /><i /></div><button onClick={() => { setMode("shallow"); openCapture("为博士论文推进一个十分钟的小步骤"); }}>今天陪它游十分钟</button></div></div><div className="deep-notes"><p className="eyebrow">DEEP SEA NOTES</p><h2>暂时不执行，也不必忘记</h2><div className="idea-chips"><span>毕业后的研究方向</span><span>想读但还没空读的书</span><span>未来可以合作的课题</span><button>＋ 放入一个深海想法</button></div></div></section>}
+    </> : <section className="deep-panel"><div className="deep-water"><div className="deep-glow glow-one" /><div className="deep-glow glow-two" /><span className="whale">🐋</span><span className="deep-jelly">🪼</span><div className="migration-card"><p className="eyebrow">MIGRATION 01</p><span>鲸鲨 · 长期迁徙</span><h2>完成博士论文</h2><p>不需要今天抵达。每一次靠近，都会让它穿过一小片海。</p><div className="migration-line"><i /><i /><i className="current" /><i /><i /></div><button onClick={() => { setCapture("我今天想为博士论文推进一点，但脑子里还有很多别的事情"); setStage("intake"); }}>把今天想到的都说出来</button></div></div><div className="deep-notes"><p className="eyebrow">DEEP SEA NOTES</p><h2>暂时不执行，也不必忘记</h2><div className="idea-chips"><span>毕业后的研究方向</span><span>想读但还没空读的书</span><span>未来可以合作的课题</span><button>＋ 放入一个深海想法</button></div></div></section>}
 
     <button className="rescue-button" onClick={() => { setRescued(false); setRescueReason(""); setModal("rescue"); }}><span>↟</span><span><strong>我现在动不了</strong><small>带我回到水面</small></span></button>
     {modal && <div className="modal-backdrop" role="presentation" onMouseDown={() => setModal(null)}><section className={`modal-card ${modal === "focus" ? "focus-modal" : ""} ${modal === "celebrate" ? "celebrate-modal" : ""}`} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button className="close-modal" onClick={() => setModal(null)} aria-label="关闭">×</button>
@@ -98,10 +153,10 @@ export default function Home() {
       </form>}
       {modal === "workpack" && <><p className="eyebrow">DYNAMIC WORK PACK · 动态工作包</p><div className="pack-title"><span>{pack.icon}</span><div><h2>{pack.label}</h2><p>{pack.intro}</p></div></div><div className="pack-document">{pack.sections.map((section, index) => <label key={section}><span><b>{String(index + 1).padStart(2, "0")}</b>{section}</span><textarea defaultValue={index === 0 && capture ? `围绕「${capture}」，我这一次最想解决的是：` : ""} placeholder="可以现在写，也可以先留空……" /></label>)}</div><p className="gentle-note">工作包会跟着气泡内容生成；它是思考扶手，不是另一份必须填完的表格。</p><button className="primary-action full" onClick={() => setModal("capture")}>带着工作包回到潜水路线</button></>}
       {modal === "weather" && <><p className="eyebrow">CHECK THE TIDE · 感受海况</p><h2>今天的你，有多少氧气？</h2><p className="modal-lead">这不是能力测试，只是为今天选择一个舒服的鱼缸大小。</p><div className="weather-list">{weathers.map((item) => <button key={item.capacity} className={weather.capacity === item.capacity ? "chosen" : ""} onClick={() => { setWeather(item); setModal(null); }}><span>{item.icon}</span><span><strong>{item.name}</strong><small>{item.note}</small></span><b>{item.capacity} 枚</b></button>)}</div></>}
-      {modal === "focus" && <><p className="eyebrow">FOLLOW ONE FISH · 只跟一条鱼</p><div className={`focus-creature ${selectedTask.color}`}>{selectedTask.creature}</div><h2>{selectedTask.title}</h2><p className="focus-next">现在只做这一件事：<strong>{selectedTask.next}</strong></p><div className={`timer ${running ? "ticking" : ""}`}>{clock}</div><p className="timer-note">不用做完整件事，只陪它游完这一小段。</p><div className="focus-actions"><button className="secondary-action" onClick={() => setRunning((value) => !value)}>{running ? "暂停一下" : "开始计时"}</button><button className="primary-action" onClick={completeStep}>我完成这一小步了 ✓</button></div><button className="shrink-link" onClick={() => { setModal("rescue"); setRescueReason("觉得太大"); }}>还是太难了，帮我再缩小</button></>}
+      {modal === "focus" && <><p className="eyebrow">FOLLOW ONE FISH · 只跟一条鱼</p><div className={`focus-creature ${selectedTask.color}`}>{selectedTask.creature}</div><h2>{selectedTask.title}</h2><p className="focus-next">可以先从这里靠近：<strong>{selectedTask.next}</strong></p><label className="focus-time-editor"><span>我现在估计整件事需要</span><span><input type="number" min="5" max="600" step="5" value={selectedTask.minutes} onChange={(event) => changeSelectedMinutes(Number(event.target.value))} /> 分钟</span></label><div className={`timer ${running ? "ticking" : ""}`}>{clock}</div><p className="timer-note">这是你给自己的时间参考，不是完成任务的资格线。提前或晚一点都可以直接点完成。</p><div className="focus-actions"><button className="secondary-action" onClick={() => setRunning((value) => !value)}>{running ? "暂停一下" : "开始计时"}</button><button className="primary-action" onClick={completeStep}>这件事完成了，孵化伙伴 ✓</button></div><button className="shrink-link" onClick={() => { setModal("rescue"); setRescueReason("觉得太大"); }}>现在还是太难，先缩成一个靠近动作</button></>}
       {modal === "rescue" && <><p className="eyebrow">SURFACE MODE · 回到水面</p><div className="rescue-symbol">↟</div><h2>{rescued ? "好，我们只做两分钟" : "没关系，先告诉我卡在哪里"}</h2>{!rescued ? <><p className="modal-lead">你不需要解释得很完整，点一个最接近的就好。</p><div className="reason-grid">{["不知道怎么开始","觉得太大","害怕做不好","太累了","被别的想法吸走","环境不合适"].map((reason) => <button className={rescueReason === reason ? "chosen" : ""} key={reason} onClick={() => setRescueReason(reason)}>{reason}</button>)}</div><button disabled={!rescueReason} className="primary-action full" onClick={() => setRescued(true)}>帮我缩到两分钟</button></> : <><div className="two-minute-card"><small>你的安全靠近动作</small><strong>只打开相关入口，什么都不用改。</strong><span>做完可以立刻回来摸鱼。</span></div><p className="gentle-note">其他提醒已经暂时沉到水下。此刻只需要看见这一件事。</p><button className="primary-action full" onClick={() => { setSeconds(2 * 60); setRunning(false); setModal("focus"); }}>好，陪它游两分钟</button></>}</>}
-      {modal === "collection" && <><p className="eyebrow">OCEAN FIELD GUIDE · 海洋图鉴</p><h2>你已经陪这些生命来到这里</h2><p className="modal-lead">这里收藏的不是“自律”，而是你一次次愿意重新开始的证据。</p><div className="collection-grid"><article><span>🐠</span><small>No. 001 · 已入住</small><strong>珊瑚小丑鱼</strong><p>在不想打开论文时，仍然找到了第一条批注。</p></article><article><span>🪼</span><small>No. 002 · 已发现</small><strong>月亮水母</strong><p>学会了等待别人回复时，不继续消耗氧气。</p></article><article className="locked"><span>◌</span><small>No. 003 · 孵化中</small><strong>神秘的新朋友</strong><p>再完成一个小步骤，就能看见它。</p></article></div></>}
-      {modal === "celebrate" && <><div className="celebrate-water"><span className="hatch-ring" /><span className="new-fish">🐠</span><i className="spark s1">✦</i><i className="spark s2">·</i><i className="spark s3">✧</i></div><p className="eyebrow">A NEW LIFE · 成功孵化</p><h2>你让一件重要的事，向前游了一小段</h2><p className="modal-lead">这不只是“打了一个勾”。你克服了启动、注意力和不确定性，完成了一个真实的前进。</p><div className="reward-card"><span>＋ 1</span><div><small>获得新记录</small><strong>今晚，我愿意先开始两分钟。</strong></div></div><button className="primary-action full" onClick={() => setModal("collection")}>把它放进我的海洋图鉴</button></>}
+      {modal === "collection" && <><p className="eyebrow">OCEAN FIELD GUIDE · 海洋图鉴</p><h2>你真正孵化出的伙伴</h2><p className="modal-lead">每位伙伴都会从鱼卵一直陪你游到这里，保持它原来的样子。</p>{tasks.some((task) => task.status === "done") ? <div className="collection-grid">{tasks.filter((task) => task.status === "done").map((task, index) => <article key={task.id}><span>{task.creature}</span><small>No. {String(index + 1).padStart(3, "0")} · 已入住</small><strong>{task.species}</strong><p>{task.title}</p></article>)}</div> : <div className="empty-collection"><span>◌</span><strong>图鉴还在等第一位伙伴</strong><p>完成任意一件任务后，它会带着原来的样子住进这里。</p></div>}</>}
+      {modal === "celebrate" && <><div className={`celebrate-water ${selectedTask.color}`}><span className="hatch-ring" /><span className="new-fish">{selectedTask.creature}</span><i className="spark s1">✦</i><i className="spark s2">·</i><i className="spark s3">✧</i></div><p className="eyebrow">A NEW LIFE · 成功孵化</p><h2>{selectedTask.species}来到你的海洋了</h2><p className="modal-lead">你完成的是「{selectedTask.title}」。时间只是你自己的估计，真正让伙伴孵化的是你确认这件事已经完成。</p><div className="reward-card"><span>{selectedTask.creature}</span><div><small>图鉴新增伙伴</small><strong>{selectedTask.species} · 会保持原来的样子</strong></div></div><button className="primary-action full" onClick={() => setModal("collection")}>去图鉴看看它</button></>}
     </section></div>}
   </main>;
 }
