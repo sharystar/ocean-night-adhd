@@ -1,5 +1,4 @@
-git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
-import { buildLocalIntake, type IntakeEgg, type IntakeResult } from "../../../lib/intake";
+import { buildLocalIntake, splitIntakeMatters, stabilizeIntakeEggs, type IntakeEgg, type IntakeResult } from "../../../lib/intake";
 
 export const runtime = "edge";
 
@@ -11,8 +10,8 @@ const schema = {
     required: ["summary", "careNote", "eggs"],
     properties: {
       summary: { type: "string" }, careNote: { type: "string" },
-      eggs: { type: "array", minItems: 1, maxItems: 8, items: { type: "object", additionalProperties: false, required: ["id", "title", "kind", "kindLabel", "creature", "species", "color", "reason", "firstStep", "doneDefinition", "estimatedMinutes"], properties: {
-        id: { type: "string" }, title: { type: "string" }, kind: { enum: ["assigned", "communication", "writing", "reading", "meeting", "analysis", "admin", "emotion", "general"] }, kindLabel: { type: "string" }, creature: { type: "string" }, species: { type: "string" }, color: { type: "string" }, reason: { type: "string" }, firstStep: { type: "string" }, doneDefinition: { type: "string" }, estimatedMinutes: { type: "integer", minimum: 5, maximum: 600 },
+      eggs: { type: "array", minItems: 1, maxItems: 12, items: { type: "object", additionalProperties: false, required: ["id", "title", "kind", "kindLabel", "creature", "species", "color", "reason", "firstStep", "doneDefinition", "estimatedMinutes"], properties: {
+        id: { type: "string" }, title: { type: "string" }, kind: { enum: ["assigned", "communication", "writing", "reading", "meeting", "analysis", "admin", "health", "life", "emotion", "general"] }, kindLabel: { type: "string" }, creature: { type: "string" }, species: { type: "string" }, color: { type: "string" }, reason: { type: "string" }, firstStep: { type: "string" }, doneDefinition: { type: "string" }, estimatedMinutes: { type: "integer", minimum: 5, maximum: 600 },
       } } },
     },
   },
@@ -29,6 +28,7 @@ export async function POST(request: Request) {
   const input = body.input?.trim() || "";
   if (input.length < 2 || input.length > 4000) return Response.json({ error: "请写下 2–4000 个字，想到哪里说到哪里。" }, { status: 400 });
   const fallback = buildLocalIntake(input);
+  const candidateMatters = splitIntakeMatters(input);
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return Response.json(fallback);
 
@@ -43,8 +43,8 @@ export async function POST(request: Request) {
         provider: { require_parameters: true, data_collection: "deny", zdr: true },
         response_format: { type: "json_schema", json_schema: schema },
         messages: [
-          { role: "system", content: "你是 ADHD 研究生的海洋收件箱。用户会一次倾倒混在一起的任务、关系困扰和情绪。先识别彼此独立、可单独完成的事情，每件生成一枚鱼卵，通常 1–6 枚。外来委托、与导师沟通、自己的研究推进、情绪照护必须在确实同时存在时分成不同鱼卵，不能把情绪当作写作步骤。estimatedMinutes 是整件事的现实时间，由你给出初始建议但用户会修改；不要把两分钟启动动作误写成整件事耗时。海洋伙伴在任务卡、完成庆祝和图鉴中必须保持一致。情绪照护不能诊断，不能羞辱，也不能承诺治疗。输出严格 JSON。" },
-          { role: "user", content: input },
+          { role: "system", content: "你是 ADHD 研究生的海洋收件箱。第一原则是事项覆盖，不是主题概括：每个能被单独完成、等待、发送或照顾的事项都必须生成一枚鱼卵；即使多个事项属于同一类别，也不能去重。只有共享同一交付物的连续动作才可以合并，例如制作同一份 PPT 时的翻译与补证据。外来委托、与导师沟通、自己的研究推进、生活杂务和情绪照护必须在确实同时存在时分开。不要把整段话概括成一个主题，也不要因为不熟悉就把所有事情变成一只海龟。estimatedMinutes 是整件事的现实时间。情绪照护不能诊断、羞辱或承诺治疗。输出严格 JSON。" },
+          { role: "user", content: JSON.stringify({ rawInput: input, candidateMatters, instruction: "逐项核对 candidateMatters；可以修正切分，但不得遗漏任何独立事项。" }) },
         ],
       }),
     });
@@ -54,7 +54,9 @@ export async function POST(request: Request) {
     if (!content) throw new Error("empty");
     const parsed = JSON.parse(content);
     if (!valid(parsed)) throw new Error("invalid");
-    return Response.json({ ...parsed, source: "openrouter" });
+    const eggs = stabilizeIntakeEggs(parsed.eggs);
+    if (eggs.length < fallback.eggs.length) throw new Error("coverage");
+    return Response.json({ ...parsed, eggs, summary: `我在这颗大泡泡里听见了 ${eggs.length} 股不同的水流。`, source: "openrouter" });
   } catch { return Response.json({ ...fallback, degraded: true }); }
   finally { clearTimeout(timeout); }
 }
